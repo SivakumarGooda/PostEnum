@@ -25,7 +25,7 @@ report.
 | Credentials | AutoLogon, AlwaysInstallElevated, cmdkey, PS history, unattend files, **PuTTY**, **VNC**, **wireless keys**, **browser stores**, **certificates** | History files, authorized_keys, private keys, `.env`/backups, **GPG**, **SSH agent** |
 | Network | IP, routes, ARP, ports, firewall, shares | Interfaces, routes, sockets, iptables, resolvers |
 | Remote access / lateral | **SMB config + shares + sessions**, **RDP config + client history**, **WinRM config** | **VPN configs**, **Samba/NFS exports**, **SSH agent** |
-| Sessions & domain | **Logged-on users, Kerberos tickets, domain trusts, Domain Admins, GPP cpassword** | **`w`/`who`/`last`/`lastb`, auth logs, journalctl** |
+| Sessions & domain | **Logged-on users, Kerberos tickets (local), domain membership, DC/site, applied GPO** — host-local only | **`w`/`who`/`last`/`lastb`, auth logs, journalctl** |
 | Filesystem | Writable paths, ACLs, **recent files** | Mounts, world-writable, **root-owned writable files**, **linker config**, PATH hijack |
 | Defense / breakout | AV/Defender + **exclusions**, AppLocker, LAPS, secedit | SUID/SGID, capabilities, docker/lxd |
 | Cloud / runtime | **WSL distributions** | **Cloud CLI creds (`.aws`/`.gcloud`/`.azure`/`.docker`), IMDS probe, sysctl + kernel mitigations** |
@@ -60,8 +60,9 @@ Every run produces one Markdown file with three layers:
    Detected checks include token privileges, writable service binaries and
    directories, unquoted path candidates, AlwaysInstallElevated, AutoLogon,
    stored credentials, wireless PSKs, Defender exclusions, UAC/token filter,
-   SMB signing, privileged scheduled tasks, domain/Kerberos, GPP `cpassword`,
-   cloud credentials (Windows); and sudo/GTFOBins, SUID/SGID/capabilities,
+   SMB signing, privileged scheduled tasks, and domain membership/cached
+   tickets (host-local only — no domain-wide enumeration), plus cloud
+   credentials (Windows); and sudo/GTFOBins, SUID/SGID/capabilities,
    docker/lxd, passwd/shadow, writable sudoers/cron/systemd units,
    `ld.so.preload`, writable root-owned files, PATH, SSH keys/agent, cloud
    credentials/IMDS, NFS `no_root_squash`, GPG and kernel level (Linux).

