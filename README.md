@@ -1,4 +1,4 @@
-# ServEnum
+# PostEnum
 
 Post-exploitation enumeration scripts for **Windows** and **Linux** servers.
 
